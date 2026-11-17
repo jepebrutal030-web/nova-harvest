@@ -93,6 +93,18 @@ export function createAudio() {
       noise({ seconds: 0.3, volume: 0.5, cutoff: 900 });
       blip({ type: 'sawtooth', from: 160, to: 40, seconds: 0.35, volume: 0.45 });
     },
+    bossHit() {
+      blip({ type: 'square', from: 110, to: 70, seconds: 0.1, volume: 0.3 });
+      noise({ seconds: 0.08, volume: 0.18, cutoff: 700 });
+    },
+    bossDie() {
+      noise({ seconds: 0.7, volume: 0.55, cutoff: 1500 });
+      blip({ type: 'sawtooth', from: 220, to: 30, seconds: 0.7, volume: 0.4 });
+      [523, 659, 784, 1047, 1319].forEach((f, i) => blip({ type: 'triangle', from: f, to: f, seconds: 0.2, volume: 0.35, delay: 0.35 + i * 0.1 }));
+    },
+    stingerShoot() {
+      blip({ type: 'sawtooth', from: 320, to: 180, seconds: 0.08, volume: 0.1 });
+    },
     waveClear() {
       [523, 659, 784, 1047].forEach((f, i) => blip({ type: 'triangle', from: f, to: f, seconds: 0.16, volume: 0.35, delay: i * 0.09 }));
     },

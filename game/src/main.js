@@ -8,7 +8,7 @@
 // window.__shotReady for a screenshot.
 import { BEST_KEY, STEP } from './config.js';
 import { createRandom } from './random.js';
-import { createWorld, EVENT_HIT, EVENT_KILL, EVENT_OVER, EVENT_PICKUP, EVENT_SHOOT, EVENT_WAVE, EVENT_WIN } from './world.js';
+import { createWorld, EVENT_BOSS_DIE, EVENT_BOSS_HIT, EVENT_HIT, EVENT_KILL, EVENT_OVER, EVENT_PICKUP, EVENT_SHOOT, EVENT_WAVE, EVENT_WIN } from './world.js';
 import { ACTION_CONFIRM, ACTION_MUTE, ACTION_PAUSE, ACTION_RESTART, createInput } from './input.js';
 import { createAudio } from './audio.js';
 import { createRenderer, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE, SCREEN_WIN } from './render.js';
@@ -119,6 +119,8 @@ function runGame() {
     if (events & EVENT_KILL) audio.kill();
     if (events & EVENT_HIT) audio.hit();
     if (events & EVENT_WAVE) audio.waveClear();
+    if (events & EVENT_BOSS_HIT) audio.bossHit();
+    if (events & EVENT_BOSS_DIE) audio.bossDie();
   }
 
   function step() {

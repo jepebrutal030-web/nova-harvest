@@ -1,7 +1,8 @@
-// NOVA HARVEST — everything the player sees. One canvas, one palette: deep
+// NOVA HARVEST v2 — everything the player sees. One canvas, one palette: deep
 // space, neon cyan and gold against void magenta. The HUD, the title, the
 // win and game-over screens are all drawn here, so a screenshot of the
-// canvas is a screenshot of the whole game.
+// canvas is a screenshot of the whole game. v2 adds the Void Leviathan boss
+// (with its own HP bar), Stinger shooters, enemy bolts and a muzzle flash.
 import { COMBO, FIELD, LIVES, PLAYER, SHARD, WAVES_TOTAL } from './config.js';
 
 export const SCREEN_TITLE = 'title';
@@ -16,6 +17,7 @@ const DIM = '#9db8d6';
 const GOLD = '#ffd166';
 const CYAN = '#38e1ff';
 const MAGENTA = '#c77dff';
+const PINK = '#ff5da2';
 const RED = '#ff6b6b';
 const GREEN = '#7dff9e';
 
@@ -149,7 +151,59 @@ export function createRenderer(canvas) {
     star4(s.x, s.y, SHARD.radius, GOLD, s.phase);
   }
 
+  function drawBoss(e) {
+    // The Void Leviathan: a huge spiked ring around a burning core. The ring
+    // turns with its phase and the core pulses faster as its hull drops.
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    const hurt = 1 - e.hp / e.maxHp;
+    const spikes = 12;
+    ctx.shadowColor = '#ff9d45';
+    ctx.shadowBlur = 26;
+    ctx.fillStyle = '#2a0a2e';
+    ctx.strokeStyle = '#ff9d45';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let i = 0; i < spikes * 2; i += 1) {
+      const a = (i / (spikes * 2)) * TAU + e.phase * 0.25;
+      const r = i % 2 === 0 ? e.r + 10 : e.r - 6;
+      const px = Math.cos(a) * r;
+      const py = Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    // Inner ring.
+    ctx.strokeStyle = MAGENTA;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, e.r - 16, 0, TAU);
+    ctx.stroke();
+    // Burning core: brighter and faster as it is hurt.
+    const corePulse = 1 + 0.25 * Math.sin(e.phase * (3 + hurt * 6));
+    const coreR = 13 * corePulse;
+    ctx.shadowColor = hurt > 0.5 ? RED : '#ff9d45';
+    ctx.shadowBlur = 22;
+    ctx.fillStyle = hurt > 0.5 ? '#ff3b3b' : '#ffb347';
+    ctx.beginPath();
+    ctx.arc(0, 0, coreR, 0, TAU);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#fff3d6';
+    ctx.beginPath();
+    ctx.arc(0, 0, coreR * 0.45, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+
   function drawEnemy(e) {
+    if (e.kind === 'boss') {
+      drawBoss(e);
+      return;
+    }
     ctx.save();
     ctx.translate(e.x, e.y);
     if (e.kind === 'drifter') {
@@ -175,6 +229,30 @@ export function createRenderer(canvas) {
       ctx.fillStyle = '#f0abfc';
       ctx.beginPath();
       ctx.arc(0, 0, 4.5, 0, TAU);
+      ctx.fill();
+    } else if (e.kind === 'stinger') {
+      // A Stinger: a pink dart with a glowing barrel that telegraphs its shot.
+      const pulse = 1 + 0.2 * Math.sin(e.phase * 4);
+      ctx.scale(pulse, pulse);
+      ctx.shadowColor = PINK;
+      ctx.shadowBlur = 16;
+      ctx.fillStyle = '#3d0a2a';
+      ctx.strokeStyle = PINK;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, -e.r - 4);
+      ctx.lineTo(e.r, e.r);
+      ctx.lineTo(0, e.r - 5);
+      ctx.lineTo(-e.r, e.r);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      // The barrel glows as the next shot charges.
+      const charge = 1 - Math.max(0, e.fireTimer) / 2.6;
+      ctx.fillStyle = charge > 0.7 ? '#ffffff' : PINK;
+      ctx.beginPath();
+      ctx.arc(0, -2, 3 + charge * 2.5, 0, TAU);
       ctx.fill();
     } else {
       const pulse = 1 + 0.16 * Math.sin(e.phase * 3);
@@ -206,7 +284,25 @@ export function createRenderer(canvas) {
     ctx.restore();
   }
 
-  function drawPlayer(p, time) {
+  function drawEbolt(b, time) {
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    const pulse = 1 + 0.3 * Math.sin(time * 12);
+    ctx.shadowColor = RED;
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = '#ff3b3b';
+    ctx.beginPath();
+    ctx.arc(0, 0, b.r * pulse, 0, TAU);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ffd6d6';
+    ctx.beginPath();
+    ctx.arc(0, 0, b.r * 0.45, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawPlayer(p, state, time) {
     ctx.save();
     ctx.translate(p.x, p.y);
     const blink = p.invuln > 0 && Math.floor(time * 14) % 2 === 0;
@@ -240,6 +336,21 @@ export function createRenderer(canvas) {
     ctx.beginPath();
     ctx.arc(0, -4, 3.4, 0, TAU);
     ctx.fill();
+    // Muzzle flash: a bright star at the gun tip while the shot is fresh.
+    if (state.muzzle > 0) {
+      ctx.globalAlpha = state.muzzle / 0.08;
+      ctx.shadowColor = '#fff7ae';
+      ctx.shadowBlur = 16;
+      ctx.fillStyle = '#fff7ae';
+      ctx.beginPath();
+      ctx.moveTo(0, -26);
+      ctx.lineTo(4, -18);
+      ctx.lineTo(0, -20);
+      ctx.lineTo(-4, -18);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
     ctx.restore();
     ctx.globalAlpha = 1;
   }
@@ -258,20 +369,35 @@ export function createRenderer(canvas) {
     ctx.fillStyle = DIM;
     ctx.font = font(400, 12);
     ctx.fillText(`BEST ${Math.max(best, state.score)}`, pad, 74);
-    // Top-centre: wave + quota bar.
+    // Top-centre: wave + quota bar, or the boss HP bar on wave 8.
     ctx.textAlign = 'center';
-    ctx.fillStyle = DIM;
-    ctx.font = font(400, 13);
-    ctx.fillText(`WAVE ${state.wave} / ${WAVES_TOTAL}`, FIELD.width / 2, 26);
-    const barW = 220;
-    const barX = FIELD.width / 2 - barW / 2;
-    ctx.fillStyle = 'rgba(255,255,255,0.12)';
-    ctx.fillRect(barX, 34, barW, 10);
-    ctx.fillStyle = GOLD;
-    ctx.fillRect(barX, 34, barW * Math.min(1, state.collected / state.quota), 10);
-    ctx.fillStyle = INK;
-    ctx.font = font(400, 13);
-    ctx.fillText(`${state.collected} / ${state.quota} SHARDS`, FIELD.width / 2, 62);
+    if (state.boss) {
+      ctx.fillStyle = '#ff9d45';
+      ctx.font = font(900, 14);
+      ctx.fillText('VOID LEVIATHAN', FIELD.width / 2, 26);
+      const barW = 260;
+      const barX = FIELD.width / 2 - barW / 2;
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      ctx.fillRect(barX, 34, barW, 12);
+      ctx.fillStyle = state.boss.hp / state.boss.maxHp > 0.5 ? '#ff9d45' : RED;
+      ctx.fillRect(barX, 34, barW * Math.max(0, state.boss.hp / state.boss.maxHp), 12);
+      ctx.fillStyle = INK;
+      ctx.font = font(400, 13);
+      ctx.fillText(`${state.boss.hp} / ${state.boss.maxHp} HULL`, FIELD.width / 2, 62);
+    } else {
+      ctx.fillStyle = DIM;
+      ctx.font = font(400, 13);
+      ctx.fillText(`WAVE ${state.wave} / ${WAVES_TOTAL}`, FIELD.width / 2, 26);
+      const barW = 220;
+      const barX = FIELD.width / 2 - barW / 2;
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      ctx.fillRect(barX, 34, barW, 10);
+      ctx.fillStyle = GOLD;
+      ctx.fillRect(barX, 34, barW * Math.min(1, state.collected / state.quota), 10);
+      ctx.fillStyle = INK;
+      ctx.font = font(400, 13);
+      ctx.fillText(`${state.collected} / ${state.quota} SHARDS`, FIELD.width / 2, 62);
+    }
     // Top-right: hull hearts.
     ctx.textAlign = 'right';
     for (let i = 0; i < LIVES; i += 1) {
@@ -315,7 +441,7 @@ export function createRenderer(canvas) {
     ctx.textAlign = 'center';
     ctx.fillStyle = INK;
     ctx.font = font(900, 44);
-    ctx.shadowColor = CYAN;
+    ctx.shadowColor = state.boss ? '#ff9d45' : CYAN;
     ctx.shadowBlur = 24;
     ctx.fillText(state.banner.text, FIELD.width / 2, FIELD.height / 2 - 60);
     ctx.shadowBlur = 0;
@@ -353,23 +479,24 @@ export function createRenderer(canvas) {
     ctx.fillStyle = DIM;
     ctx.font = font(400, 17);
     ctx.fillText('Collect the star shards. Dodge the void. Survive all 8 waves.', cx, 292);
-    panel(cx - 250, 318, 500, 132);
+    panel(cx - 250, 318, 500, 152);
     ctx.fillStyle = INK;
     ctx.font = font(400, 16);
-    ctx.fillText('WASD / Arrows — fly the harvester', cx, 348);
-    ctx.fillText('Mouse — aim    Click / Space — fire', cx, 376);
-    ctx.fillText('Fill the shard quota to clear each wave', cx, 404);
-    ctx.fillText('Green cells repair 1 hull  ·  P pause  ·  M mute', cx, 428);
+    ctx.fillText('WASD / Arrows — fly the harvester', cx, 346);
+    ctx.fillText('Mouse — aim    Click / Space — fire', cx, 374);
+    ctx.fillText('Fill the shard quota to clear each wave', cx, 402);
+    ctx.fillText('Stingers shoot back — dodge their bolts', cx, 430);
+    ctx.fillText('Wave 8: destroy the Void Leviathan  ·  P pause  ·  M mute', cx, 452);
     if (best > 0) {
       ctx.fillStyle = GOLD;
       ctx.font = font(900, 18);
-      ctx.fillText(`BEST ${best}`, cx, 482);
+      ctx.fillText(`BEST ${best}`, cx, 502);
     }
     // A slow pulse, never fully off: the start prompt must read in a still frame.
     ctx.globalAlpha = 0.65 + 0.35 * Math.sin(state.time * 3);
     ctx.fillStyle = CYAN;
     ctx.font = font(900, 22);
-    ctx.fillText('CLICK OR PRESS SPACE TO START', cx, 532);
+    ctx.fillText('CLICK OR PRESS SPACE TO START', cx, 548);
     ctx.globalAlpha = 1;
   }
 
@@ -398,7 +525,7 @@ export function createRenderer(canvas) {
     ctx.shadowBlur = 0;
     ctx.fillStyle = INK;
     ctx.font = font(400, 19);
-    ctx.fillText('All 8 waves cleared. The nebula is yours.', cx, 228);
+    ctx.fillText('All 8 waves cleared. The Leviathan is dust.', cx, 228);
     ctx.fillStyle = DIM;
     ctx.font = font(400, 15);
     ctx.fillText('FINAL SCORE', cx, 292);
@@ -457,6 +584,7 @@ export function createRenderer(canvas) {
     drawBackground(state.time);
     for (const s of state.shards) drawShard(s);
     for (const e of state.enemies) drawEnemy(e);
+    for (const b of state.ebolts) drawEbolt(b, state.time);
     ctx.save();
     ctx.shadowColor = '#a5f3fc';
     ctx.shadowBlur = 8;
@@ -467,7 +595,7 @@ export function createRenderer(canvas) {
       ctx.fill();
     }
     ctx.restore();
-    if (state.player && screen !== SCREEN_TITLE) drawPlayer(state.player, state.time);
+    if (state.player && screen !== SCREEN_TITLE) drawPlayer(state.player, state, state.time);
     for (const pt of state.particles) {
       ctx.globalAlpha = Math.max(0, pt.life / pt.maxLife);
       ctx.fillStyle = pt.color;
