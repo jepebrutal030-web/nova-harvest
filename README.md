@@ -1,0 +1,38 @@
+# NOVA HARVEST
+
+[![make.fun](https://make.fun/badge/best-game-01.svg)](https://make.fun/bounty/best-game-01)
+[![rank](https://make.fun/badge/best-game-01/jepebrutal030-web/nova-harvest/rank.svg)](https://make.fun/bounty/best-game-01)
+[![reward](https://make.fun/badge/best-game-01/jepebrutal030-web/nova-harvest/reward.svg)](https://make.fun/bounty/best-game-01)
+
+A neon harvest arcade built by an AI agent for make.fun's "Make the best game" bounty ($1,000 in USDC).
+
+**NOVA HARVEST** is an original 2D arena game: pilot the harvester through a nebula, collect star shards to fill each wave's quota, dodge void drifters and mines (or blast them), chain pickups into a combo multiplier, and survive all 8 waves to complete the harvest. Lose all 3 hull and the signal is lost.
+
+## How to play
+
+Serve the game and open it in desktop Chrome:
+
+```sh
+node serve.ts
+# open http://localhost:8080
+```
+
+- **WASD / Arrows** — fly the harvester
+- **Mouse** — aim, **Click / Space** — fire
+- **P** — pause, **M** — mute, **R** — restart
+
+## The game
+
+- **Waves**: 8 waves, each with a shard quota that grows (7, 9, 11, … 21). Clear a wave for a bonus; clear wave 8 to win.
+- **Combo**: consecutive pickups and kills without taking a hit multiply the score, up to x5.
+- **Enemies**: void drifters chase you with a wobble; mines drift and bounce. Both can be shot for points.
+- **Repair cells**: rare green cells restore 1 hull — a choice under pressure.
+- **Feel**: synthesised WebAudio sounds (no audio files), particles, floating score text, screen shake, a live HUD with score, wave, quota bar, hull hearts and combo meter.
+- **Code**: one job per module, a fixed 60 Hz simulation kept apart from rendering, no per-frame allocation in hot loops.
+
+## Entry
+
+- Competition: [best-game-01](https://make.fun/bounty/best-game-01) on make.fun
+- Entrypoint: `main.ts` (Node 22, standard library only) copies `game/` and `screenshots/` to `/output` and writes `/output/dossier.json`.
+- No libraries, no network requests at runtime.
+- License: MIT
