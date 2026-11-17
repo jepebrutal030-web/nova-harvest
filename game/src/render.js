@@ -1,15 +1,18 @@
-// NOVA HARVEST v2 — everything the player sees. One canvas, one palette: deep
+// NOVA HARVEST v3 — everything the player sees. One canvas, one palette: deep
 // space, neon cyan and gold against void magenta. The HUD, the title, the
-// win and game-over screens are all drawn here, so a screenshot of the
-// canvas is a screenshot of the whole game. v2 adds the Void Leviathan boss
-// (with its own HP bar), Stinger shooters, enemy bolts and a muzzle flash.
-import { COMBO, FIELD, LIVES, PLAYER, SHARD, WAVES_TOTAL } from './config.js';
+// shop, the win and game-over screens are all drawn here, so a screenshot of
+// the canvas is a screenshot of the whole game. v3 adds a parallax sky with
+// shooting stars, a richer harvester, Weaver and Splitter enemies, shockwave
+// rings, a salvage + upgrade HUD, the between-wave shop, and run stats on
+// the win and game-over screens.
+import { COMBO, FIELD, LIVES, PLAYER, SHARD, UPGRADES, WAVES_TOTAL } from './config.js';
 
 export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
 export const SCREEN_PAUSED = 'paused';
 export const SCREEN_WIN = 'win';
 export const SCREEN_OVER = 'over';
+export const SCREEN_SHOP = 'shop';
 
 const TAU = Math.PI * 2;
 const INK = '#e8f6ff';
@@ -20,10 +23,26 @@ const MAGENTA = '#c77dff';
 const PINK = '#ff5da2';
 const RED = '#ff6b6b';
 const GREEN = '#7dff9e';
+const ORANGE = '#ffa94d';
 
 function font(weight, px) {
   return `${weight} ${px}px "Arial Black", "Segoe UI", Arial, sans-serif`;
 }
+
+function fmtTime(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/** The shop card grid, shared by the draw and the click hit-test. */
+const SHOP = {
+  x: 72,
+  y: 150,
+  w: 400,
+  h: 112,
+  gap: 16,
+};
 
 export function createRenderer(canvas) {
   const ctx = canvas.getContext('2d');
@@ -32,13 +51,15 @@ export function createRenderer(canvas) {
   let offsetY = 0;
 
   // A fixed starfield, seeded once so the sky never flickers between frames.
+  // Three parallax layers: faint far dust, mid stars, and a few bright
+  // glinting stars up close.
   const stars = [];
   let seed = 1337;
   function rnd() {
     seed = (seed * 1664525 + 1013904223) >>> 0;
     return seed / 4294967296;
   }
-  for (let i = 0; i < 130; i += 1) {
+  for (let i = 0; i < 190; i += 1) {
     stars.push({
       x: rnd() * FIELD.width,
       y: rnd() * FIELD.height,
@@ -47,12 +68,21 @@ export function createRenderer(canvas) {
       tw: rnd() * TAU,
     });
   }
+  const brightStars = [];
+  for (let i = 0; i < 14; i += 1) {
+    brightStars.push({ x: rnd() * FIELD.width, y: rnd() * FIELD.height, tw: rnd() * TAU });
+  }
   const nebulae = [
     { x: 180, y: 130, r: 260, color: '123,47,190' },
     { x: 780, y: 420, r: 300, color: '13,110,120' },
     { x: 620, y: 90, r: 200, color: '160,20,90' },
     { x: 120, y: 500, r: 190, color: '20,60,140' },
+    { x: 480, y: 300, r: 340, color: '90,20,140' },
+    { x: 880, y: 120, r: 170, color: '10,90,90' },
   ];
+  // Shooting stars: one streaks across every few seconds.
+  let nextMeteor = 4;
+  const meteors = [];
 
   function resize() {
     const w = window.innerWidth;
@@ -86,23 +116,72 @@ export function createRenderer(canvas) {
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, FIELD.width, FIELD.height);
     for (const n of nebulae) {
+      const pulse = 0.16 + 0.05 * Math.sin(time * 0.25 + n.x);
       const rg = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r);
-      rg.addColorStop(0, `rgba(${n.color},0.20)`);
+      rg.addColorStop(0, `rgba(${n.color},${pulse.toFixed(3)})`);
       rg.addColorStop(1, `rgba(${n.color},0)`);
       ctx.fillStyle = rg;
       ctx.fillRect(n.x - n.r, n.y - n.r, n.r * 2, n.r * 2);
     }
     for (const s of stars) {
-      const drift = time * (4 + s.layer * 10);
+      // Far stars barely move, near stars drift: parallax.
+      const drift = time * (3 + s.layer * 16);
       const x = ((s.x + drift) % FIELD.width + FIELD.width) % FIELD.width;
-      const alpha = 0.35 + 0.4 * Math.abs(Math.sin(time * 0.8 + s.tw));
-      ctx.globalAlpha = alpha * (0.5 + s.layer * 0.5);
+      const alpha = 0.3 + 0.4 * Math.abs(Math.sin(time * 0.8 + s.tw));
+      ctx.globalAlpha = alpha * (0.4 + s.layer * 0.6);
       ctx.fillStyle = s.layer > 0.66 ? '#cfe9ff' : '#8fb4d8';
       ctx.beginPath();
       ctx.arc(x, s.y, s.r, 0, TAU);
       ctx.fill();
     }
+    // Bright stars with a cross glint.
+    for (const s of brightStars) {
+      const a = 0.35 + 0.45 * Math.abs(Math.sin(time * 0.6 + s.tw));
+      ctx.globalAlpha = a;
+      ctx.strokeStyle = '#dff3ff';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(s.x - 7, s.y);
+      ctx.lineTo(s.x + 7, s.y);
+      ctx.moveTo(s.x, s.y - 7);
+      ctx.lineTo(s.x, s.y + 7);
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 1.8, 0, TAU);
+      ctx.fill();
+    }
     ctx.globalAlpha = 1;
+    // Shooting stars.
+    if (time >= nextMeteor) {
+      nextMeteor = time + 4 + (nextMeteor * 37 % 3);
+      meteors.push({
+        x: 120 + ((nextMeteor * 91) % 720),
+        y: 40 + ((nextMeteor * 53) % 120),
+        vx: -260,
+        vy: 150,
+        life: 0.8,
+      });
+    }
+    for (let i = meteors.length - 1; i >= 0; i -= 1) {
+      const m = meteors[i];
+      m.x += m.vx * 0.016;
+      m.y += m.vy * 0.016;
+      m.life -= 0.016;
+      if (m.life <= 0) {
+        meteors.splice(i, 1);
+        continue;
+      }
+      const grad = ctx.createLinearGradient(m.x, m.y, m.x - m.vx * 0.18, m.y - m.vy * 0.18);
+      grad.addColorStop(0, `rgba(255,255,255,${(m.life * 0.9).toFixed(2)})`);
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(m.x, m.y);
+      ctx.lineTo(m.x - m.vx * 0.18, m.y - m.vy * 0.18);
+      ctx.stroke();
+    }
   }
 
   function star4(x, y, r, color, pulse) {
@@ -254,6 +333,86 @@ export function createRenderer(canvas) {
       ctx.beginPath();
       ctx.arc(0, -2, 3 + charge * 2.5, 0, TAU);
       ctx.fill();
+    } else if (e.kind === 'weaver') {
+      // A Weaver: an orange arrowhead. While it locks on, a bright ring and
+      // a dashed aim line telegraph the dash.
+      if (e.mode === 'tele') {
+        ctx.save();
+        ctx.rotate(Math.atan2(e.dashY, e.dashX) + Math.PI / 2);
+        ctx.strokeStyle = 'rgba(255,169,77,0.7)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.moveTo(0, -e.r);
+        ctx.lineTo(0, -150);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+        ctx.strokeStyle = ORANGE;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, e.r + 8 + 3 * Math.sin(e.phase * 10), 0, TAU);
+        ctx.stroke();
+      }
+      const pulse = 1 + 0.15 * Math.sin(e.phase * 5);
+      ctx.scale(pulse, pulse);
+      ctx.shadowColor = ORANGE;
+      ctx.shadowBlur = 16;
+      ctx.fillStyle = '#3d1c05';
+      ctx.strokeStyle = ORANGE;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, -e.r - 6);
+      ctx.lineTo(e.r * 0.8, e.r * 0.6);
+      ctx.lineTo(0, e.r * 0.2);
+      ctx.lineTo(-e.r * 0.8, e.r * 0.6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#ffe8cc';
+      ctx.beginPath();
+      ctx.arc(0, -3, 3.2, 0, TAU);
+      ctx.fill();
+    } else if (e.kind === 'splitter') {
+      // A Splitter: a big cracked green rock. The cracks glow brighter and
+      // the inner core shows as its hull drops.
+      const pulse = 1 + 0.1 * Math.sin(e.phase * 2);
+      ctx.scale(pulse, pulse);
+      ctx.shadowColor = '#8ce99a';
+      ctx.shadowBlur = 16;
+      ctx.fillStyle = '#122b16';
+      ctx.strokeStyle = '#8ce99a';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i += 1) {
+        const a = (i / 6) * TAU + e.phase * 0.15;
+        const px = Math.cos(a) * e.r;
+        const py = Math.sin(a) * e.r;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      // Cracks: a star of lines from the centre.
+      ctx.strokeStyle = '#d3f9d8';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let i = 0; i < 3; i += 1) {
+        const a = (i / 3) * TAU + e.phase * 0.5;
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(a) * (e.r - 4), Math.sin(a) * (e.r - 4));
+      }
+      ctx.stroke();
+      // Hull pips: one bright dot per hull left.
+      ctx.fillStyle = '#8ce99a';
+      for (let i = 0; i < e.hp; i += 1) {
+        ctx.beginPath();
+        ctx.arc(-5 + i * 10, 0, 3, 0, TAU);
+        ctx.fill();
+      }
     } else {
       const pulse = 1 + 0.16 * Math.sin(e.phase * 3);
       ctx.scale(pulse, pulse);
@@ -307,7 +466,7 @@ export function createRenderer(canvas) {
     ctx.translate(p.x, p.y);
     const blink = p.invuln > 0 && Math.floor(time * 14) % 2 === 0;
     ctx.globalAlpha = blink ? 0.35 : 1;
-    // Engine flame.
+    // Engine flame, flickering under the hull.
     const flame = 10 + Math.sin(time * 30) * 3;
     ctx.shadowColor = CYAN;
     ctx.shadowBlur = 18;
@@ -319,22 +478,42 @@ export function createRenderer(canvas) {
     ctx.closePath();
     ctx.fill();
     ctx.rotate(p.angle + Math.PI / 2);
-    // Hull: a swept dart.
+    // Hull: a swept dart with twin wings, side pods and a glowing canopy.
     ctx.fillStyle = '#0e7490';
     ctx.strokeStyle = CYAN;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(0, -17);
-    ctx.lineTo(11, 10);
-    ctx.lineTo(0, 5);
-    ctx.lineTo(-11, 10);
+    ctx.moveTo(0, -19);
+    ctx.lineTo(8, 2);
+    ctx.lineTo(16, 12);
+    ctx.lineTo(7, 9);
+    ctx.lineTo(0, 6);
+    ctx.lineTo(-7, 9);
+    ctx.lineTo(-16, 12);
+    ctx.lineTo(-8, 2);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
     ctx.shadowBlur = 0;
+    // Wing stripes.
+    ctx.strokeStyle = GOLD;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-13, 8);
+    ctx.lineTo(-7, 3);
+    ctx.moveTo(13, 8);
+    ctx.lineTo(7, 3);
+    ctx.stroke();
+    // Canopy.
     ctx.fillStyle = '#ecfeff';
     ctx.beginPath();
-    ctx.arc(0, -4, 3.4, 0, TAU);
+    ctx.ellipse(0, -7, 3.6, 6, 0, 0, TAU);
+    ctx.fill();
+    // Side pods.
+    ctx.fillStyle = '#155e75';
+    ctx.beginPath();
+    ctx.arc(-11, 8, 2.6, 0, TAU);
+    ctx.arc(11, 8, 2.6, 0, TAU);
     ctx.fill();
     // Muzzle flash: a bright star at the gun tip while the shot is fresh.
     if (state.muzzle > 0) {
@@ -343,10 +522,10 @@ export function createRenderer(canvas) {
       ctx.shadowBlur = 16;
       ctx.fillStyle = '#fff7ae';
       ctx.beginPath();
-      ctx.moveTo(0, -26);
-      ctx.lineTo(4, -18);
-      ctx.lineTo(0, -20);
-      ctx.lineTo(-4, -18);
+      ctx.moveTo(0, -28);
+      ctx.lineTo(4, -20);
+      ctx.lineTo(0, -22);
+      ctx.lineTo(-4, -20);
       ctx.closePath();
       ctx.fill();
       ctx.shadowBlur = 0;
@@ -355,10 +534,13 @@ export function createRenderer(canvas) {
     ctx.globalAlpha = 1;
   }
 
-  function drawHud(state, best) {
+  /** The HUD. In minimal mode (the shop) only the score block and the hull
+   * hearts are drawn: the shop panel already shows the wave, the salvage and
+   * the upgrades, and the centre bar would sit under its title. */
+  function drawHud(state, best, minimal) {
     const pad = 16;
     ctx.textBaseline = 'alphabetic';
-    // Top-left: score.
+    // Top-left: score + salvage.
     ctx.textAlign = 'left';
     ctx.fillStyle = DIM;
     ctx.font = font(400, 13);
@@ -366,9 +548,33 @@ export function createRenderer(canvas) {
     ctx.fillStyle = INK;
     ctx.font = font(900, 26);
     ctx.fillText(String(state.score), pad, 54);
+    ctx.fillStyle = GOLD;
+    ctx.font = font(900, 15);
+    ctx.fillText(`SALVAGE ${state.salvage}`, pad, 76);
     ctx.fillStyle = DIM;
     ctx.font = font(400, 12);
-    ctx.fillText(`BEST ${Math.max(best, state.score)}`, pad, 74);
+    ctx.fillText(`BEST ${Math.max(best, state.score)}`, pad, 94);
+    if (minimal) {
+      // Top-right: hull hearts only.
+      ctx.textAlign = 'right';
+      const maxHull = state.player.maxHull || LIVES;
+      for (let i = 0; i < maxHull; i += 1) {
+        const x = FIELD.width - pad - i * 30;
+        const y = 34;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.fillStyle = i < state.player.hull ? '#ff5d73' : 'rgba(255,255,255,0.16)';
+        ctx.shadowColor = i < state.player.hull ? '#ff5d73' : 'transparent';
+        ctx.shadowBlur = i < state.player.hull ? 10 : 0;
+        ctx.beginPath();
+        ctx.moveTo(0, 8);
+        ctx.bezierCurveTo(-11, -2, -7, -11, 0, -5);
+        ctx.bezierCurveTo(7, -11, 11, -2, 0, 8);
+        ctx.fill();
+        ctx.restore();
+      }
+      return;
+    }
     // Top-centre: wave + quota bar, or the boss HP bar on wave 8.
     ctx.textAlign = 'center';
     if (state.boss) {
@@ -397,10 +603,16 @@ export function createRenderer(canvas) {
       ctx.fillStyle = INK;
       ctx.font = font(400, 13);
       ctx.fillText(`${state.collected} / ${state.quota} SHARDS`, FIELD.width / 2, 62);
+      if (state.modifier) {
+        ctx.fillStyle = ORANGE;
+        ctx.font = font(900, 12);
+        ctx.fillText(state.modifier.name, FIELD.width / 2, 80);
+      }
     }
-    // Top-right: hull hearts.
+    // Top-right: hull hearts (max hull grows with Aegis Plating).
     ctx.textAlign = 'right';
-    for (let i = 0; i < LIVES; i += 1) {
+    const maxHull = state.player.maxHull || LIVES;
+    for (let i = 0; i < maxHull; i += 1) {
       const x = FIELD.width - pad - i * 30;
       const y = 34;
       ctx.save();
@@ -420,11 +632,23 @@ export function createRenderer(canvas) {
       ctx.textAlign = 'left';
       ctx.fillStyle = GOLD;
       ctx.font = font(900, 18);
-      ctx.fillText(`COMBO x${state.combo}`, pad, 100);
+      ctx.fillText(`COMBO x${state.combo}`, pad, 120);
       ctx.fillStyle = 'rgba(255,255,255,0.12)';
-      ctx.fillRect(pad, 108, 120, 6);
+      ctx.fillRect(pad, 128, 120, 6);
       ctx.fillStyle = GOLD;
-      ctx.fillRect(pad, 108, 120 * Math.max(0, state.comboTimer / COMBO.window), 6);
+      ctx.fillRect(pad, 128, 120 * Math.max(0, state.comboTimer / COMBO.window), 6);
+    }
+    // Owned upgrades: small pips under the combo meter.
+    const owned = UPGRADES.filter((u) => state.upgrades[u.id] > 0);
+    if (owned.length > 0) {
+      ctx.textAlign = 'left';
+      ctx.font = font(900, 12);
+      let oy = state.combo > 1 ? 152 : 120;
+      for (const u of owned) {
+        ctx.fillStyle = CYAN;
+        ctx.fillText(`${u.name} ${'●'.repeat(state.upgrades[u.id])}${'○'.repeat(u.costs.length - state.upgrades[u.id])}`, pad, oy);
+        oy += 16;
+      }
     }
     // Bottom hint.
     ctx.textAlign = 'center';
@@ -461,11 +685,116 @@ export function createRenderer(canvas) {
     ctx.stroke();
   }
 
+  /** The shop card at field point (x, y), or -1. Shared with drawShop. */
+  function shopCardAt(x, y) {
+    for (let i = 0; i < UPGRADES.length; i += 1) {
+      const cx = SHOP.x + (i % 2) * (SHOP.w + SHOP.gap);
+      const cy = SHOP.y + Math.floor(i / 2) * (SHOP.h + SHOP.gap);
+      if (x >= cx && x <= cx + SHOP.w && y >= cy && y <= cy + SHOP.h) return i;
+    }
+    return -1;
+  }
+
+  function drawShop(state) {
+    ctx.fillStyle = 'rgba(4,6,18,0.55)';
+    ctx.fillRect(0, 0, FIELD.width, FIELD.height);
+    const cx = FIELD.width / 2;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = GOLD;
+    ctx.font = font(900, 40);
+    ctx.shadowColor = GOLD;
+    ctx.shadowBlur = 20;
+    ctx.fillText('WAVE CLEARED!', cx, 74);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = INK;
+    ctx.font = font(400, 18);
+    ctx.fillText(`Spend your salvage before wave ${state.shop.wave}`, cx, 104);
+    ctx.fillStyle = GOLD;
+    ctx.font = font(900, 22);
+    ctx.fillText(`SALVAGE ${state.salvage}`, cx, 134);
+    for (let i = 0; i < UPGRADES.length; i += 1) {
+      const u = UPGRADES[i];
+      const level = state.upgrades[u.id];
+      const maxed = level >= u.costs.length;
+      const cost = maxed ? 0 : u.costs[level];
+      const afford = !maxed && state.salvage >= cost;
+      const x = SHOP.x + (i % 2) * (SHOP.w + SHOP.gap);
+      const y = SHOP.y + Math.floor(i / 2) * (SHOP.h + SHOP.gap);
+      ctx.save();
+      ctx.fillStyle = maxed ? 'rgba(20,40,30,0.9)' : afford ? 'rgba(8,30,44,0.92)' : 'rgba(10,10,24,0.85)';
+      ctx.strokeStyle = maxed ? 'rgba(125,255,158,0.6)' : afford ? 'rgba(56,225,255,0.7)' : 'rgba(157,184,214,0.3)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(x, y, SHOP.w, SHOP.h, 12);
+      ctx.fill();
+      ctx.stroke();
+      ctx.textAlign = 'left';
+      ctx.fillStyle = maxed ? GREEN : afford ? INK : DIM;
+      ctx.font = font(900, 18);
+      ctx.fillText(`[${u.key}] ${u.name}`, x + 16, y + 32);
+      ctx.fillStyle = DIM;
+      ctx.font = font(400, 14);
+      ctx.fillText(u.desc, x + 16, y + 58);
+      // Level pips.
+      ctx.font = font(900, 15);
+      ctx.fillStyle = CYAN;
+      ctx.fillText('●'.repeat(level) + '○'.repeat(u.costs.length - level), x + 16, y + 86);
+      // Price.
+      ctx.textAlign = 'right';
+      if (maxed) {
+        ctx.fillStyle = GREEN;
+        ctx.font = font(900, 17);
+        ctx.fillText('MAXED', x + SHOP.w - 16, y + 86);
+      } else {
+        ctx.fillStyle = afford ? GOLD : RED;
+        ctx.font = font(900, 20);
+        ctx.fillText(`${cost} ✦`, x + SHOP.w - 16, y + 86);
+      }
+      ctx.restore();
+    }
+    ctx.textAlign = 'center';
+    ctx.fillStyle = DIM;
+    ctx.font = font(400, 15);
+    ctx.fillText('Kills pay salvage — drifters 10, mines 8, stingers 15, weavers 12, splitters 20', cx, 420);
+    ctx.globalAlpha = 0.65 + 0.35 * Math.sin(state.time * 3);
+    ctx.fillStyle = CYAN;
+    ctx.font = font(900, 20);
+    ctx.fillText('PRESS 1-4 TO BUY  ·  SPACE TO LAUNCH THE NEXT WAVE', cx, 458);
+    ctx.globalAlpha = 1;
+  }
+
   function drawTitle(state, best) {
     ctx.fillStyle = 'rgba(4,6,18,0.45)';
     ctx.fillRect(0, 0, FIELD.width, FIELD.height);
     const cx = FIELD.width / 2;
     ctx.textAlign = 'center';
+    // A little harvester flies above the logo.
+    ctx.save();
+    ctx.translate(cx, 52);
+    ctx.rotate(Math.sin(state.time * 0.8) * 0.12);
+    ctx.shadowColor = CYAN;
+    ctx.shadowBlur = 18;
+    ctx.fillStyle = '#0e7490';
+    ctx.strokeStyle = CYAN;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, -17);
+    ctx.lineTo(9, 4);
+    ctx.lineTo(17, 12);
+    ctx.lineTo(7, 9);
+    ctx.lineTo(0, 6);
+    ctx.lineTo(-7, 9);
+    ctx.lineTo(-17, 12);
+    ctx.lineTo(-9, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ecfeff';
+    ctx.beginPath();
+    ctx.ellipse(0, -5, 3.2, 5.4, 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
     ctx.fillStyle = GOLD;
     ctx.font = font(400, 16);
     ctx.fillText('A NEON HARVEST ARCADE', cx, 108);
@@ -479,14 +808,17 @@ export function createRenderer(canvas) {
     ctx.fillStyle = DIM;
     ctx.font = font(400, 17);
     ctx.fillText('Collect the star shards. Dodge the void. Survive all 8 waves.', cx, 292);
-    panel(cx - 250, 318, 500, 152);
+    ctx.fillStyle = ORANGE;
+    ctx.font = font(900, 15);
+    ctx.fillText('NEW: BETWEEN-WAVE UPGRADES  ·  WEAVERS  ·  SPLITTERS  ·  WAVE TWISTS', cx, 316);
+    panel(cx - 250, 332, 500, 138);
     ctx.fillStyle = INK;
     ctx.font = font(400, 16);
-    ctx.fillText('WASD / Arrows — fly the harvester', cx, 346);
-    ctx.fillText('Mouse — aim    Click / Space — fire', cx, 374);
-    ctx.fillText('Fill the shard quota to clear each wave', cx, 402);
-    ctx.fillText('Stingers shoot back — dodge their bolts', cx, 430);
-    ctx.fillText('Wave 8: destroy the Void Leviathan  ·  P pause  ·  M mute', cx, 452);
+    ctx.fillText('WASD / Arrows — fly the harvester', cx, 360);
+    ctx.fillText('Mouse — aim    Click / Space — fire', cx, 388);
+    ctx.fillText('Fill the shard quota, then spend salvage in the shop', cx, 416);
+    ctx.fillText('Weavers dash, Splitters burst apart, Stingers shoot back', cx, 444);
+    ctx.fillText('Wave 8: destroy the Void Leviathan  ·  P pause  ·  M mute', cx, 466);
     if (best > 0) {
       ctx.fillStyle = GOLD;
       ctx.font = font(900, 18);
@@ -512,33 +844,59 @@ export function createRenderer(canvas) {
     ctx.fillText('Press P or click to keep flying', FIELD.width / 2, FIELD.height / 2 + 30);
   }
 
+  function drawStats(state, best, cy) {
+    const s = state.stats;
+    const rows = [
+      ['WAVES CLEARED', String(Math.min(state.wave, WAVES_TOTAL))],
+      ['ENEMIES DOWN', String(s.kills)],
+      ['SHARDS COLLECTED', String(s.pickups)],
+      ['MAX COMBO', `x${s.maxCombo}`],
+      ['TIME', fmtTime(s.timePlayed)],
+      ['SALVAGE EARNED', String(s.salvageEarned)],
+    ];
+    ctx.textAlign = 'left';
+    const x0 = FIELD.width / 2 - 150;
+    for (let i = 0; i < rows.length; i += 1) {
+      const y = cy + i * 24;
+      ctx.fillStyle = DIM;
+      ctx.font = font(400, 14);
+      ctx.fillText(rows[i][0], x0, y);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = INK;
+      ctx.font = font(900, 14);
+      ctx.fillText(rows[i][1], FIELD.width / 2 + 150, y);
+      ctx.textAlign = 'left';
+    }
+  }
+
   function drawWin(state, best) {
     ctx.fillStyle = 'rgba(4,6,18,0.55)';
     ctx.fillRect(0, 0, FIELD.width, FIELD.height);
     const cx = FIELD.width / 2;
     ctx.textAlign = 'center';
     ctx.fillStyle = GOLD;
-    ctx.font = font(900, 54);
+    ctx.font = font(900, 50);
     ctx.shadowColor = GOLD;
     ctx.shadowBlur = 26;
-    ctx.fillText('HARVEST COMPLETE!', cx, 190);
+    ctx.fillText('HARVEST COMPLETE!', cx, 118);
     ctx.shadowBlur = 0;
     ctx.fillStyle = INK;
-    ctx.font = font(400, 19);
-    ctx.fillText('All 8 waves cleared. The Leviathan is dust.', cx, 228);
+    ctx.font = font(400, 18);
+    ctx.fillText('All 8 waves cleared. The Leviathan is dust.', cx, 150);
     ctx.fillStyle = DIM;
     ctx.font = font(400, 15);
-    ctx.fillText('FINAL SCORE', cx, 292);
+    ctx.fillText('FINAL SCORE', cx, 190);
     ctx.fillStyle = INK;
-    ctx.font = font(900, 56);
-    ctx.fillText(String(state.score), cx, 348);
+    ctx.font = font(900, 52);
+    ctx.fillText(String(state.score), cx, 242);
     ctx.fillStyle = best > state.score ? DIM : GOLD;
     ctx.font = font(900, 18);
-    ctx.fillText(best > state.score ? `BEST ${best}` : 'NEW BEST!', cx, 386);
+    ctx.fillText(best > state.score ? `BEST ${best}` : 'NEW BEST!', cx, 276);
+    drawStats(state, best, 316);
     ctx.globalAlpha = 0.65 + 0.35 * Math.sin(state.time * 3);
     ctx.fillStyle = CYAN;
     ctx.font = font(900, 20);
-    ctx.fillText('PRESS R OR CLICK TO PLAY AGAIN', cx, 452);
+    ctx.fillText('PRESS R OR CLICK TO PLAY AGAIN', cx, 500);
     ctx.globalAlpha = 1;
   }
 
@@ -548,27 +906,28 @@ export function createRenderer(canvas) {
     const cx = FIELD.width / 2;
     ctx.textAlign = 'center';
     ctx.fillStyle = RED;
-    ctx.font = font(900, 54);
+    ctx.font = font(900, 50);
     ctx.shadowColor = RED;
     ctx.shadowBlur = 26;
-    ctx.fillText('SIGNAL LOST', cx, 190);
+    ctx.fillText('SIGNAL LOST', cx, 118);
     ctx.shadowBlur = 0;
     ctx.fillStyle = INK;
-    ctx.font = font(400, 19);
-    ctx.fillText(`The void took the harvester on wave ${state.wave}.`, cx, 228);
+    ctx.font = font(400, 18);
+    ctx.fillText(`The void took the harvester on wave ${state.wave}.`, cx, 150);
     ctx.fillStyle = DIM;
     ctx.font = font(400, 15);
-    ctx.fillText('SCORE', cx, 292);
+    ctx.fillText('SCORE', cx, 190);
     ctx.fillStyle = INK;
-    ctx.font = font(900, 56);
-    ctx.fillText(String(state.score), cx, 348);
+    ctx.font = font(900, 52);
+    ctx.fillText(String(state.score), cx, 242);
     ctx.fillStyle = DIM;
     ctx.font = font(900, 18);
-    ctx.fillText(`BEST ${Math.max(best, state.score)}`, cx, 386);
+    ctx.fillText(`BEST ${Math.max(best, state.score)}`, cx, 276);
+    drawStats(state, best, 316);
     ctx.globalAlpha = 0.65 + 0.35 * Math.sin(state.time * 3);
     ctx.fillStyle = CYAN;
     ctx.font = font(900, 20);
-    ctx.fillText('PRESS R OR CLICK TO TRY AGAIN', cx, 452);
+    ctx.fillText('PRESS R OR CLICK TO TRY AGAIN', cx, 500);
     ctx.globalAlpha = 1;
   }
 
@@ -604,6 +963,16 @@ export function createRenderer(canvas) {
       ctx.fill();
     }
     ctx.globalAlpha = 1;
+    // Shockwave rings, expanding and fading.
+    for (const r of state.rings) {
+      ctx.globalAlpha = Math.max(0, r.life / r.maxLife);
+      ctx.strokeStyle = r.color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, r.r, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
     ctx.textAlign = 'left';
     for (const f of state.floats) {
       ctx.globalAlpha = Math.max(0, f.life / 0.9);
@@ -613,6 +982,7 @@ export function createRenderer(canvas) {
     }
     ctx.globalAlpha = 1;
     if (screen === SCREEN_PLAY || screen === SCREEN_PAUSED) drawHud(state, best);
+    else if (screen === SCREEN_SHOP) drawHud(state, best, true);
     drawBanner(state);
     if (state.flash > 0) {
       ctx.fillStyle = `rgba(255,60,60,${state.flash * 0.28})`;
@@ -620,10 +990,11 @@ export function createRenderer(canvas) {
     }
     if (screen === SCREEN_TITLE) drawTitle(state, best);
     else if (screen === SCREEN_PAUSED) drawPaused();
+    else if (screen === SCREEN_SHOP) drawShop(state);
     else if (screen === SCREEN_WIN) drawWin(state, best);
     else if (screen === SCREEN_OVER) drawOver(state, best);
     ctx.restore();
   }
 
-  return { draw, toField };
+  return { draw, toField, shopCardAt };
 }

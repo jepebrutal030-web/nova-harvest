@@ -89,6 +89,50 @@ export function createAudio() {
       noise({ seconds: 0.18, volume: 0.35, cutoff: 2400 });
       blip({ type: 'sawtooth', from: 220, to: 60, seconds: 0.18, volume: 0.3 });
     },
+    /** Each enemy dies with its own voice, so a kill tells you what died. */
+    killKind(kind) {
+      if (kind === 'drifter') {
+        blip({ type: 'sine', from: 660, to: 180, seconds: 0.1, volume: 0.3 });
+        noise({ seconds: 0.1, volume: 0.2, cutoff: 3000 });
+      } else if (kind === 'mine') {
+        noise({ seconds: 0.28, volume: 0.45, cutoff: 800 });
+        blip({ type: 'sine', from: 120, to: 40, seconds: 0.25, volume: 0.4 });
+      } else if (kind === 'stinger') {
+        blip({ type: 'sawtooth', from: 980, to: 240, seconds: 0.12, volume: 0.25 });
+        blip({ type: 'square', from: 1400, to: 500, seconds: 0.08, volume: 0.15, delay: 0.04 });
+      } else if (kind === 'weaver') {
+        blip({ type: 'sawtooth', from: 1400, to: 300, seconds: 0.09, volume: 0.22 });
+        noise({ seconds: 0.12, volume: 0.25, cutoff: 4000 });
+      } else if (kind === 'splitter') {
+        noise({ seconds: 0.2, volume: 0.4, cutoff: 1400 });
+        blip({ type: 'triangle', from: 300, to: 90, seconds: 0.16, volume: 0.35 });
+        blip({ type: 'triangle', from: 200, to: 60, seconds: 0.14, volume: 0.3, delay: 0.08 });
+      } else if (kind === 'boss') {
+        this.bossDie();
+      } else {
+        this.kill();
+      }
+    },
+    /** The Leviathan announces itself: a low rising roar under a noise swell. */
+    roar() {
+      blip({ type: 'sawtooth', from: 55, to: 140, seconds: 0.9, volume: 0.45 });
+      blip({ type: 'sawtooth', from: 82, to: 200, seconds: 0.9, volume: 0.3, delay: 0.08 });
+      noise({ seconds: 0.8, volume: 0.25, cutoff: 500 });
+    },
+    /** The shop opens with a soft two-note chime. */
+    shopOpen() {
+      blip({ type: 'triangle', from: 784, to: 784, seconds: 0.14, volume: 0.3 });
+      blip({ type: 'triangle', from: 1047, to: 1047, seconds: 0.2, volume: 0.3, delay: 0.1 });
+    },
+    /** A purchase: a bright coin arpeggio. */
+    buy() {
+      [1047, 1319, 1568].forEach((f, i) => blip({ type: 'sine', from: f, to: f, seconds: 0.1, volume: 0.3, delay: i * 0.06 }));
+    },
+    /** A low horn when the next wave launches. */
+    waveHorn() {
+      blip({ type: 'sawtooth', from: 196, to: 196, seconds: 0.25, volume: 0.3 });
+      blip({ type: 'sawtooth', from: 294, to: 294, seconds: 0.3, volume: 0.25, delay: 0.12 });
+    },
     hit() {
       noise({ seconds: 0.3, volume: 0.5, cutoff: 900 });
       blip({ type: 'sawtooth', from: 160, to: 40, seconds: 0.35, volume: 0.45 });
